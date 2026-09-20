@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ディミニッシュ7th — CRT + 3D + In-Camera</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+  #info {
+    position: fixed;
+    left: 12px;
+    bottom: 10px;
+    color: #7fdfff;
+    font-family: monospace;
+    font-size: 12px;
+    opacity: .55;
+    pointer-events: none;
+    text-shadow: 0 0 4px #000;
+  }
+  #startBtn {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 14px 28px;
+    font-size: 16px;
+    font-family: monospace;
+    background: #111;
+    color: #7fdfff;
+    border: 1px solid #7fdfff;
+    border-radius: 6px;
+    cursor: pointer;
+    z-index: 10;
+  }
+  #startBtn:hover { background: #1c1c1c; }
+  #err {
+    position: fixed;
+    top: 60%;
+    left: 50%;
+    transform: translate(-50%, 0);
+    color: #ff8080;
+    font-family: monospace;
+    font-size: 13px;
+    max-width: 80vw;
+    text-align: center;
+    display: none;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<button id="startBtn">▶ カメラを起動してCRTシーンを開始</button>
+<div id="err"></div>
+<div id="info">ディミニッシュ7th — CRT effect + raymarched torus + in-camera</div>
+
+<!-- カメラ映像を受け取る非表示のvideo要素 -->
+<video id="camVideo" autoplay playsinline muted style="display:none"></video>
+
+<script>
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl2');
+if (!gl) {
+  alert('WebGL2 に対応していないブラウザです。');
+}
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.floor(window.innerWidth * dpr);
+  canvas.height = Math.floor(window.innerHeight * dpr);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// -------------------- 頂点シェーダー（フルスクリーン三角形） --------------------
+const vertSrc = `#version 300 es
+void main() {
+  vec2 pos[3] = vec2[3](vec2(-1.0,-1.0), vec2(3.0,-1.0), vec2(-1.0,3.0));
+  gl_Position = vec4(pos[gl_VertexID], 0.0, 1.0);
+}`;
+
+// -------------------- フラグメントシェーダー --------------------
+const fragSrc = `#version 300 es
+precision highp float;
+
+uniform vec2 iResolution;
+uniform float iTime;
+
+// ---- カメラ関連 uniform ----
+uniform sampler2D uCamera;   // カメラ映像テクスチャ
+uniform vec2 uCamResolution; // カメラ映像の解像度(幅,高さ)
+uniform float uHasCamera;    // 0=カメラ未起動(3Dのみ) 1=カメラ起動済み
+
+out vec4 fragColor;
+
+// ============================================================
+// 「ディミニッシュ7th（減七の和音）」— CRT + 3D + インカメラ 合成サンプル
+// ============================================================
+// 構成：
+//   1. インカメラ映像を画面いっぱいに"背景"として敷く（アスペクト比補正込み）
+//   2. その手前に回転トーラス＋床を通常どおりレイマーチングで描画
+//      （レイが何にも当たらなかった場合はカメラ映像がそのまま見える）
+//   3. 最後にCRTポストプロセス（魚眼歪み／走査線／端の黒グラデーション）
+//      を全体にかける
+//
+// 【カメラ部分だけ他のシェーダーに移植したい場合】
+//   ・uniform sampler2D uCamera と uCamResolution を追加
+//   ・getCameraColor(fragCoord) を呼んで背景色として使う
+//   ・JS側は下の「カメラ取得部分」を参照（getUserMedia→texImage2D更新）
+// ============================================================
+
+// ---------------- CRT エフェクト部分 ----------------
+
+vec2 crtDistort(vec2 uv, float distAmt) {
+	float r2 = dot(uv, uv);
+	return uv * (1. + distAmt * r2);
+}
+
+float crtScanline(vec2 fc, float time, float freq, float speed) {
+	return .82 + .18 * sin(fc.y * freq - time * speed);
+}
+
+float crtEdgeFade(vec2 fc, vec2 res, float outerR, float innerR) {
+	vec2 qc = (fc / res) * 2. - 1.;
+	float r = length(qc);
+	return smoothstep(outerR, innerR, r);
+}
+
+vec3 applyCRT(vec3 col, vec2 fc, vec2 res, float time) {
+	col *= crtScanline(fc, time, 1.15, 22.);
+	col *= crtEdgeFade(fc, res, 1.15, .5);
+	return col;
+}
+
+// ---------------- カメラ映像サンプリング ----------------
+// 画面(iResolution)とカメラ映像(uCamResolution)のアスペクト比が違っても
+// 中央基準で「cover」フィットするようUVを補正し、フロントカメラらしく
+// 左右反転（鏡像）してサンプリングする。
+vec3 getCameraColor(vec2 fragCoord) {
+	vec2 screenUV = fragCoord / iResolution.xy; // 0..1
+	vec2 uv = screenUV - .5;
+
+	float screenAspect = iResolution.x / iResolution.y;
+	float camAspect = uCamResolution.x / uCamResolution.y;
+
+	if (screenAspect > camAspect) {
+		uv.y *= camAspect / screenAspect;
+	} else {
+		uv.x *= screenAspect / camAspect;
+	}
+	uv += .5;
+
+	uv.x = 1.0 - uv.x; // 鏡写しにする（自撮り感を出すため）
+	uv = clamp(uv, 0.0, 1.0);
+
+	return texture(uCamera, uv).rgb;
+}
+
+// ---------------- 3D シーン（レイマーチング）部分 ----------------
+
+#define sat(x) clamp(x, 0., 1.)
+
+float sdTorus(vec3 p, vec2 t) {
+	vec2 q = vec2(length(p.xz) - t.x, p.y);
+	return length(q) - t.y;
+}
+
+float sdPlane(vec3 p) { return p.y + 1.2; }
+
+vec2 map(vec3 p) {
+	vec3 q = p;
+	float a = iTime * .6;
+	mat2 rot = mat2(cos(a), -sin(a), sin(a), cos(a));
+	q.xz = rot * q.xz;
+	q.xy = mat2(cos(a * .7), -sin(a * .7), sin(a * .7), cos(a * .7)) * q.xy;
+
+	float torus = sdTorus(q, vec2(1.0, .35));
+	float plane = sdPlane(p);
+
+	if (torus < plane) return vec2(torus, 1.);
+	return vec2(plane, 0.);
+}
+
+vec3 calcNormal(vec3 p) {
+	vec2 e = vec2(.001, 0);
+	return normalize(vec3(
+		map(p + e.xyy).x - map(p - e.xyy).x,
+		map(p + e.yxy).x - map(p - e.yxy).x,
+		map(p + e.yyx).x - map(p - e.yyx).x
+	));
+}
+
+float softShadow(vec3 ro, vec3 rd) {
+	float res = 1., t = .05;
+	for (int i = 0; i < 24; i++) {
+		float h = map(ro + rd * t).x;
+		res = min(res, 12. * h / t);
+		t += clamp(h, .02, .3);
+		if (h < .001 || t > 8.) break;
+	}
+	return sat(res);
+}
+
+// matId: 0=床, 1=トーラス。床は完全透過させ、カメラ映像を透けさせる。
+vec3 shade(vec3 p, vec3 rd, float matId) {
+	vec3 n = calcNormal(p);
+	vec3 lightDir = normalize(vec3(.6, .8, -.4));
+	float diff = sat(dot(n, lightDir));
+	float sh = softShadow(p + n * .02, lightDir);
+	float spec = pow(sat(dot(reflect(-lightDir, n), -rd)), 24.);
+
+	vec3 baseCol = vec3(.15, .65, .75); // トーラスの色（青緑）
+	vec3 col = baseCol * (.15 + diff * sh) + spec * sh * .8;
+	return col;
+}
+
+// レイマーチング。ray miss、または床(matId=0)にヒットした場合は
+// カメラ映像を背景として返す（床はカメラを透過させる役目）。
+vec3 render(vec3 ro, vec3 rd, vec2 fragCoord) {
+	float t = 0.;
+	vec3 camBg = getCameraColor(fragCoord);
+	vec3 col = mix(vec3(.02, .02, .04), camBg, uHasCamera);
+
+	for (int i = 0; i < 90; i++) {
+		vec3 p = ro + rd * t;
+		vec2 h = map(p);
+		if (h.x < .001) {
+			if (h.y > .5) {
+				// トーラスにヒット：不透明に描画
+				col = shade(p, rd, h.y);
+				col = mix(col, mix(vec3(.02,.02,.04), camBg, uHasCamera), sat(t / 14.));
+			}
+			// 床(h.y=0)はここでは何もしない → カメラ映像がそのまま見える
+			break;
+		}
+		t += h.x;
+		if (t > 14.) break;
+	}
+	return col;
+}
+
+void mainImage(out vec4 outColor, vec2 fragCoord) {
+	vec2 uv0 = (fragCoord - .5 * iResolution.xy) / iResolution.y;
+	vec2 uv  = crtDistort(uv0, .35);
+
+	vec3 ro = vec3(0., 1.4, -4.2);
+	vec3 lookAt = vec3(0., .2, 0.);
+	vec3 f = normalize(lookAt - ro);
+	vec3 r = normalize(cross(vec3(0, 1, 0), f));
+	vec3 u = cross(f, r);
+	vec3 rd = normalize(f * 1.6 + r * uv.x + u * uv.y);
+
+	vec3 col = render(ro, rd, fragCoord);
+
+	col = applyCRT(col, fragCoord, iResolution.xy, iTime);
+	col = pow(max(col, 0.), vec3(.4545));
+
+	outColor = vec4(col, 1.);
+}
+
+void main() {
+	mainImage(fragColor, gl_FragCoord.xy);
+}
+`;
+
+// -------------------- シェーダーコンパイル/リンク --------------------
+function compile(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(sh));
+    throw new Error('Shader compile failed');
+  }
+  return sh;
+}
+
+const vs = compile(gl.VERTEX_SHADER, vertSrc);
+const fs = compile(gl.FRAGMENT_SHADER, fragSrc);
+const program = gl.createProgram();
+gl.attachShader(program, vs);
+gl.attachShader(program, fs);
+gl.linkProgram(program);
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+  console.error(gl.getProgramInfoLog(program));
+  throw new Error('Program link failed');
+}
+gl.useProgram(program);
+
+const uResolution = gl.getUniformLocation(program, 'iResolution');
+const uTime = gl.getUniformLocation(program, 'iTime');
+const uCamera = gl.getUniformLocation(program, 'uCamera');
+const uCamResolution = gl.getUniformLocation(program, 'uCamResolution');
+const uHasCamera = gl.getUniformLocation(program, 'uHasCamera');
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+
+// -------------------- カメラ取得部分 --------------------
+const camVideo = document.getElementById('camVideo');
+const startBtn = document.getElementById('startBtn');
+const errDiv = document.getElementById('err');
+
+let camTexture = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, camTexture);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+// カメラ起動前のダミー1x1ピクセル
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+  new Uint8Array([0, 0, 0, 255]));
+
+let hasCamera = false;
+let camW = 1, camH = 1;
+
+async function startCamera() {
+  try {
+    // facingMode: 'user' = 前面（インカメラ）。背面にしたい場合は 'environment' に変更。
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    camVideo.srcObject = stream;
+    await camVideo.play();
+
+    // ビデオのメタデータが読み込まれてから解像度を確定
+    await new Promise(resolve => {
+      if (camVideo.readyState >= 2) resolve();
+      else camVideo.onloadedmetadata = () => resolve();
+    });
+
+    camW = camVideo.videoWidth || 1280;
+    camH = camVideo.videoHeight || 720;
+    hasCamera = true;
+    startBtn.style.display = 'none';
+  } catch (e) {
+    console.error(e);
+    errDiv.style.display = 'block';
+    errDiv.textContent = 'カメラを起動できませんでした（権限拒否、HTTPS未使用、非対応ブラウザなどの可能性があります）: ' + e.message;
+  }
+}
+
+startBtn.addEventListener('click', startCamera);
+
+// -------------------- 描画ループ --------------------
+const startTime = performance.now();
+function frame() {
+  const t = (performance.now() - startTime) / 1000;
+
+  if (hasCamera && camVideo.readyState >= 2) {
+    gl.bindTexture(gl.TEXTURE_2D, camTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, camVideo);
+  }
+
+  gl.uniform2f(uResolution, canvas.width, canvas.height);
+  gl.uniform1f(uTime, t);
+  gl.uniform2f(uCamResolution, camW, camH);
+  gl.uniform1f(uHasCamera, hasCamera ? 1.0 : 0.0);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, camTexture);
+  gl.uniform1i(uCamera, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sand Shader (砂 - 触覚表現)</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            touch-action: none;
+        }
+        #hint {
+            position: fixed;
+            left: 16px;
+            bottom: 14px;
+            color: rgba(255,255,255,0.75);
+            font-family: sans-serif;
+            font-size: 13px;
+            pointer-events: none;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+    <div id="hint">クリック（タップ）したまま押し込むと、砂がへこみます</div>
+    <script>
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+        if (!gl) {
+            alert('お使いのブラウザはWebGLをサポートしていないか、無効になっています。');
+        }
+
+        // 頂点シェーダー（画面全体を覆う四角形を形成）
+        const vsSource = `
+            attribute vec2 position;
+            void main() {
+                gl_Position = vec4(position, 0.0, 1.0);
+            }
+        `;
+
+        // フラグメントシェーダー（砂の触覚表現）
+        const fsSource = `#ifdef GL_ES
+precision mediump float;
+#endif
+
+uniform float time;
+uniform vec2  resolution;
+uniform vec2  mouse;
+uniform float press;
+
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise2(vec2 x) {
+    vec2 i = floor(x);
+    vec2 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash12(i);
+    float b = hash12(i + vec2(1.0, 0.0));
+    float c = hash12(i + vec2(0.0, 1.0));
+    float d = hash12(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float fbm2(vec2 p) {
+    float s = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 5; i++) {
+        s += a * noise2(p);
+        p = p * 2.03 + 11.7;
+        a *= 0.5;
+    }
+    return s;
+}
+
+float duneHeight(vec2 p) {
+    vec2 q = p + vec2(time * 0.02, 0.0);
+    float macro = fbm2(q * 0.18);
+    float ridge = sin(p.x * 0.6 + macro * 3.0) * 0.5 + 0.5;
+    ridge = pow(ridge, 2.0);
+    return macro * 0.55 + ridge * 0.18;
+}
+
+float indent(vec2 p, vec2 touch) {
+    float d = length(p - touch);
+    float basin = -0.5 * press * exp(-d * d * 2.2);
+    float rim   =  0.12 * press * exp(-pow(d - 0.62, 2.0) * 9.0);
+    return basin + rim;
+}
+
+float terrain(vec2 p, vec2 touch) {
+    return duneHeight(p) + indent(p, touch);
+}
+
+void main(void) {
+    vec2 uv = (gl_FragCoord.xy * 2.0 - resolution.xy) / min(resolution.x, resolution.y);
+
+    vec3 ro = vec3(0.0, 1.6, -3.4);
+    vec3 rd = normalize(vec3(uv, 1.35));
+    float ca = -0.55;
+    float sa = sin(ca);
+    float co = cos(ca);
+    rd.yz = mat2(co, -sa, sa, co) * rd.yz;
+
+    vec2 muv = (mouse * 2.0 - resolution.xy) / min(resolution.x, resolution.y);
+    vec3 rdm = normalize(vec3(muv, 1.35));
+    rdm.yz = mat2(co, -sa, sa, co) * rdm.yz;
+    float tTouch = (rdm.y < -0.0001) ? (-ro.y / rdm.y) : 1000.0;
+    vec2 touch = (ro + rdm * tTouch).xz;
+
+    vec3 skyTop = vec3(0.98, 0.85, 0.62);
+    vec3 skyBot = vec3(1.0, 0.93, 0.78);
+    vec3 col = mix(skyBot, skyTop, clamp(uv.y * 0.5 + 0.5, 0.0, 1.0));
+
+    float t = 0.1;
+    vec3 p = ro;
+    bool hit = false;
+    for (int i = 0; i < 90; i++) {
+        p = ro + rd * t;
+        float h = terrain(p.xz, touch);
+        float diffH = p.y - h;
+        if (diffH < 0.002) { hit = true; break; }
+        t += diffH * 0.55;
+        if (t > 14.0) break;
+    }
+
+    if (hit) {
+        vec2 e = vec2(0.03, 0.0);
+        float hL = terrain(p.xz - e.xy, touch);
+        float hR = terrain(p.xz + e.xy, touch);
+        float hD = terrain(p.xz - e.yx, touch);
+        float hU = terrain(p.xz + e.yx, touch);
+        vec3 norm = normalize(vec3(hL - hR, 2.0 * e.x, hD - hU));
+
+        vec2 ge = vec2(0.006, 0.0);
+        vec2 gp = p.xz * 140.0 + vec2(time * 0.6, 0.0);
+        float gL = noise2(gp - ge.xy * 140.0);
+        float gR = noise2(gp + ge.xy * 140.0);
+        float gD = noise2(gp - ge.yx * 140.0);
+        float gU = noise2(gp + ge.yx * 140.0);
+        vec3 grainNorm = normalize(vec3((gL - gR) * 1.4, 1.0, (gD - gU) * 1.4));
+        vec3 bumpNorm = normalize(mix(norm, normalize(norm + grainNorm * 0.6), 0.85));
+
+        vec3 lightDir = normalize(vec3(0.55, 0.35, -0.75));
+        float diff = max(dot(bumpNorm, lightDir), 0.0);
+        float wrap = max(dot(norm, lightDir) * 0.5 + 0.5, 0.0);
+
+        float ind = indent(p.xz, touch);
+        float wetMask = clamp(-ind / 0.4, 0.0, 1.0);
+        vec3 dryColor = mix(vec3(0.86, 0.66, 0.40), vec3(0.96, 0.80, 0.55), wrap);
+        vec3 wetColor = vec3(0.45, 0.32, 0.20);
+        vec3 base = mix(dryColor, wetColor, wetMask * 0.85);
+
+        col = base * (0.35 + diff * 0.85);
+
+        vec3 viewDir = -rd;
+        vec3 halfDir = normalize(lightDir + viewDir);
+        float sparkle = pow(max(dot(bumpNorm, halfDir), 0.0), 60.0);
+        sparkle *= smoothstep(0.55, 0.95, noise2(gp * 0.64 + 4.0));
+        col += vec3(1.0, 0.95, 0.8) * sparkle * 1.6;
+
+        col = mix(col, skyBot, 1.0 - exp(-0.045 * t * t));
+    }
+
+    gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('シェーダーのコンパイルエラー:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('プログラムのリンクエラー:', gl.getProgramInfoLog(program));
+        }
+
+        gl.useProgram(program);
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        const positions = [
+            -1.0, -1.0,
+             1.0, -1.0,
+            -1.0,  1.0,
+            -1.0,  1.0,
+             1.0, -1.0,
+             1.0,  1.0,
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+        const positionAttributeLocation = gl.getAttribLocation(program, 'position');
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+        const timeUniformLocation = gl.getUniformLocation(program, 'time');
+        const resolutionUniformLocation = gl.getUniformLocation(program, 'resolution');
+        const mouseUniformLocation = gl.getUniformLocation(program, 'mouse');
+        const pressUniformLocation = gl.getUniformLocation(program, 'press');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // ---- マウス / タッチ操作：押し込んで砂をへこませる ----
+        let mouseX = canvas.width * 0.5;
+        let mouseY = canvas.height * 0.5;
+        let pressTarget = 0.0;
+        let pressCurrent = 0.0;
+
+        function setPointer(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = clientX - rect.left;
+            // WebGLは左下が原点なのでYを反転させる
+            mouseY = canvas.height - (clientY - rect.top);
+        }
+
+        canvas.addEventListener('mousemove', (e) => setPointer(e.clientX, e.clientY));
+        canvas.addEventListener('mousedown', (e) => { setPointer(e.clientX, e.clientY); pressTarget = 1.0; });
+        window.addEventListener('mouseup', () => { pressTarget = 0.0; });
+        canvas.addEventListener('mouseleave', () => { pressTarget = 0.0; });
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            setPointer(t.clientX, t.clientY);
+            pressTarget = 1.0;
+        }, { passive: false });
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            setPointer(t.clientX, t.clientY);
+        }, { passive: false });
+        canvas.addEventListener('touchend', (e) => { e.preventDefault(); pressTarget = 0.0; }, { passive: false });
+        canvas.addEventListener('touchcancel', () => { pressTarget = 0.0; });
+
+        const startTime = performance.now();
+
+        function render() {
+            const currentTime = (performance.now() - startTime) * 0.001;
+
+            // 押し込み量をなめらかに補間（押すと素早く、離すとゆっくり戻る）
+            const rate = pressTarget > pressCurrent ? 0.18 : 0.05;
+            pressCurrent += (pressTarget - pressCurrent) * rate;
+
+            gl.uniform1f(timeUniformLocation, currentTime);
+            gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+            gl.uniform2f(mouseUniformLocation, mouseX, mouseY);
+            gl.uniform1f(pressUniformLocation, pressCurrent);
+
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

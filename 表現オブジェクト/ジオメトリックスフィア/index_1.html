@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ランダム・ポイントクラスター - スケルトン - GLSL確認用</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: radial-gradient(circle at 50% 40%, #0e1420 0%, #060810 65%, #020306 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+  }
+  canvas:active { cursor: grabbing; }
+
+  #panel {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    padding: 14px 16px;
+    width: 260px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    background: rgba(14, 18, 28, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    color: #e8ebf2;
+    font-size: 13px;
+    line-height: 1.5;
+    user-select: none;
+    z-index: 10;
+  }
+  #panel h1 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #ffffff;
+  }
+  .row { margin-bottom: 10px; }
+  .row:last-child { margin-bottom: 0; }
+  .row label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    color: #c7cbd6;
+  }
+  .row input[type="range"] { width: 100%; margin-top: 4px; accent-color: #63e6ff; }
+  .row input[type="checkbox"] { accent-color: #63e6ff; }
+  #statLine { color: #8b93a6; font-size: 11.5px; line-height: 1.6; }
+  .hint { color: #6b7280; font-size: 11px; }
+
+  #reshuffleBtn {
+    width: 100%;
+    padding: 8px 10px;
+    margin-top: 4px;
+    border: 1px solid rgba(99, 230, 255, 0.35);
+    border-radius: 8px;
+    background: rgba(99, 230, 255, 0.12);
+    color: #b6f3ff;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  #reshuffleBtn:hover { background: rgba(99, 230, 255, 0.22); }
+  #reshuffleBtn:active { background: rgba(99, 230, 255, 0.32); }
+
+  #glError {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    color: #f2c2c2;
+    background: #05070b;
+    font-size: 14px;
+    line-height: 1.7;
+    z-index: 20;
+    text-align: center;
+    white-space: pre-wrap;
+  }
+  #notice {
+    position: fixed;
+    bottom: 14px;
+    left: 16px;
+    right: 16px;
+    color: #7c8497;
+    font-size: 11px;
+    z-index: 10;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="glcanvas"></canvas>
+
+<div id="panel">
+  <h1>ランダム・ポイントクラスター</h1>
+
+  <div class="row">
+    <label>クラスターの数 <span id="countLabel">15</span></label>
+    <input type="range" id="countRange" min="2" max="24" step="1" value="15">
+  </div>
+  <div class="row">
+    <label>クラスターごとの点数 <span id="ppcLabel">80</span></label>
+    <input type="range" id="ppcRange" min="20" max="200" step="5" value="80">
+  </div>
+  <div class="row"><span id="statLine"></span></div>
+
+  <div class="row">
+    <label>変形の強さ <span id="ampLabel">1.0</span></label>
+    <input type="range" id="ampRange" min="0.2" max="2.0" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label>ノイズの粗さ <span id="freqLabel">1.0</span></label>
+    <input type="range" id="freqRange" min="0.3" max="2.5" step="0.05" value="1.0">
+  </div>
+  <div class="row">
+    <label>カオス度 <span id="chaosLabel">0.35</span></label>
+    <input type="range" id="chaosRange" min="0" max="1" step="0.05" value="0.35">
+  </div>
+  <div class="row">
+    <label>点のサイズ(統一) <span id="sizeLabel">5</span></label>
+    <input type="range" id="sizeRange" min="2" max="14" step="1" value="5">
+  </div>
+  <div class="row">
+    <label>カメラ距離(小さいほど接近) <span id="zoomLabel">0.42</span></label>
+    <input type="range" id="zoomRange" min="0.22" max="1.2" step="0.02" value="0.42">
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="pointsToggle" checked> ポイント表示</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="skeletonToggle" checked> 骨格ライン表示(常時)</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="linesToggle" checked> 動的接続ライン表示</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="rotateToggle" checked> 自動回転</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="dynamicToggle" checked> 躍動感カメラ(常時ゆらぎ・呼吸)</label>
+  </div>
+
+  <div class="row">
+    <button id="reshuffleBtn">🔀 クラスターを再生成</button>
+  </div>
+
+  <div class="row hint">ドラッグ / スワイプで視点回転</div>
+</div>
+
+<div id="notice"></div>
+<div id="glError"></div>
+
+<script>
+"use strict";
+
+// ============================================================
+// sphere.glsl が読み込めなかった場合のフォールバック用ソース
+// (file:// で直接開いた場合など、fetch がブロックされても
+//  デモが動作するように、同一内容を埋め込んでおく)
+// ============================================================
+const FALLBACK_VERTEX_SRC = `#version 300 es
+in vec3 aPosition;
+in vec3 aCenter;
+in vec3 aSeed;
+in vec4 aParams;
+in float aBridge;
+uniform mat4 uProjectionMatrix;
+uniform mat4 uModelViewMatrix;
+uniform float uTime;
+uniform float uAmpMultiplier;
+uniform float uFreqMultiplier;
+uniform float uSpikiness;
+uniform float uPulse;
+uniform float uPointSize;
+out float vDisplacement;
+out float vBridge;
+out vec3 vViewPosition;
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+    vec3 i = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+    i = mod289(i);
+    vec4 p = permute(permute(permute(
+              i.z + vec4(0.0, i1.z, i2.z, 1.0))
+            + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+            + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    float n_ = 0.142857142857;
+    vec3 ns = n_ * D.wyz - D.xzx;
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+    vec4 s0 = floor(b0) * 2.0 + 1.0;
+    vec4 s1 = floor(b1) * 2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+}
+float fbm(vec3 p) {
+    float sum = 0.0;
+    float amp = 0.5;
+    float freq = 1.0;
+    for (int i = 0; i < 4; i++) {
+        sum += amp * snoise(p * freq);
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    return sum;
+}
+void main() {
+    vec3 dir = normalize(aPosition);
+    float scale = aParams.x;
+    float amp = aParams.y * uAmpMultiplier;
+    float freq = aParams.z * uFreqMultiplier;
+    float jseed = aParams.w;
+    vec3 samplePoint = dir * freq + aSeed;
+    samplePoint += vec3(uTime * 0.10, uTime * 0.08, uTime * 0.13);
+    float n = fbm(samplePoint);
+    float turb = snoise(dir * 5.0 + aSeed * 2.3 + vec3(jseed) + uTime * 0.6);
+    float spike = sign(turb) * pow(abs(turb), 3.0);
+    n += spike * uSpikiness;
+    float radius = scale * (1.0 + n * amp) * (1.0 + uPulse * 0.15);
+    vec3 localPos = dir * radius;
+    vec3 worldPos = localPos + aCenter;
+    vDisplacement = n;
+    vBridge = aBridge;
+    vec4 viewPosition = uModelViewMatrix * vec4(worldPos, 1.0);
+    vViewPosition = viewPosition.xyz;
+    gl_Position = uProjectionMatrix * viewPosition;
+    float dist = max(-viewPosition.z, 0.5);
+    gl_PointSize = clamp(uPointSize * (6.0 / dist), 2.0, 40.0);
+}`;
+
+const FALLBACK_FRAGMENT_SRC = `#version 300 es
+precision highp float;
+in float vDisplacement;
+in float vBridge;
+in vec3 vViewPosition;
+uniform int uMode;
+uniform vec3 uColorLow;
+uniform vec3 uColorHigh;
+uniform float uOpacity;
+uniform float uPulse;
+out vec4 outColor;
+void main() {
+    float t = clamp(vDisplacement * 1.4 + 0.5, 0.0, 1.0);
+    vec3 baseColor = mix(uColorLow, uColorHigh, t);
+    float alpha = uOpacity + uPulse * 0.25;
+    if (uMode == 1) {
+        vec2 uv = gl_PointCoord * 2.0 - 1.0;
+        float d = dot(uv, uv);
+        if (d > 1.0) discard;
+        float glow = smoothstep(1.0, 0.0, d);
+        alpha *= glow;
+        baseColor += vec3(glow * 0.5);
+        baseColor = mix(baseColor, vec3(1.0, 0.92, 0.7), vBridge * glow);
+        alpha = max(alpha, vBridge * glow * 0.9);
+    }
+    outColor = vec4(baseColor, alpha);
+}`;
+
+// ============================================================
+// 小さな行列演算ユーティリティ(列優先 / column-major, WebGL標準)
+// ============================================================
+function mat4Identity(out) {
+  out.fill(0);
+  out[0] = out[5] = out[10] = out[15] = 1;
+  return out;
+}
+function mat4Multiply(out, a, b) {
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + j] * b[i * 4 + k];
+      out[i * 4 + j] = sum;
+    }
+  }
+  return out;
+}
+function mat4Perspective(out, fovyRad, aspect, near, far) {
+  const f = 1.0 / Math.tan(fovyRad / 2);
+  out.fill(0);
+  out[0] = f / aspect;
+  out[5] = f;
+  out[10] = (far + near) / (near - far);
+  out[11] = -1;
+  out[14] = (2 * far * near) / (near - far);
+  return out;
+}
+function mat4Translation(out, x, y, z) {
+  mat4Identity(out);
+  out[12] = x; out[13] = y; out[14] = z;
+  return out;
+}
+function mat4RotationX(out, rad) {
+  mat4Identity(out);
+  const c = Math.cos(rad), s = Math.sin(rad);
+  out[5] = c; out[6] = s; out[9] = -s; out[10] = c;
+  return out;
+}
+function mat4RotationY(out, rad) {
+  mat4Identity(out);
+  const c = Math.cos(rad), s = Math.sin(rad);
+  out[0] = c; out[2] = -s; out[8] = s; out[10] = c;
+  return out;
+}
+// カメラ位置(eye)・注視点(target)・上方向(up)から実際のビュー行列を作る。
+// これにより、カメラそのものを3D空間内で自由に動かせるようになる。
+function mat4LookAt(out, eye, target, up) {
+  let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+  let zlen = Math.hypot(zx, zy, zz) || 1;
+  zx /= zlen; zy /= zlen; zz /= zlen;
+
+  let xx = up[1] * zz - up[2] * zy;
+  let xy = up[2] * zx - up[0] * zz;
+  let xz = up[0] * zy - up[1] * zx;
+  let xlen = Math.hypot(xx, xy, xz) || 1;
+  xx /= xlen; xy /= xlen; xz /= xlen;
+
+  const yx = zy * xz - zz * xy;
+  const yy = zz * xx - zx * xz;
+  const yz = zx * xy - zy * xx;
+
+  out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+  out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+  out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+  out[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+  out[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+  out[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+  out[15] = 1;
+  return out;
+}
+
+// ============================================================
+// 乱数 / ベクトルユーティリティ
+// ============================================================
+const rand = (a, b) => a + Math.random() * (b - a);
+function randomUnitVector3() {
+  const z = rand(-1, 1);
+  const theta = rand(0, Math.PI * 2);
+  const r = Math.sqrt(Math.max(0, 1 - z * z));
+  return [r * Math.cos(theta), r * Math.sin(theta), z];
+}
+
+// ============================================================
+// クラスターとその中の"ランダムな点群"を構築する。
+//
+// 以前のバージョンでは各クラスターを正二十面体分割の
+// 整った球として描いていたが、今回はあえて幾何学的な球の
+// 形を保持せず、各クラスター中心のまわりにランダムな方向・
+// ランダムな距離で点をばらまくことで、より有機的でランダム
+// 性の高い構造にしている。
+//
+// 点同士を繋ぐ線(接続)も固定のメッシュ辺ではなく、後段の
+// evaluateConnections() が「今この瞬間、実際に近い点同士」
+// だけを都度judge して繋ぐ、完全に動的な仕組みになっている。
+// ============================================================
+function buildCluster(clusterCount, pointsPerCluster) {
+  // --- 1. クラスター中心をランダムな木構造で配置(互いに重なり合わせる) ---
+  const clusters = [{ center: [0, 0, 0], radius: rand(0.75, 1.05), parentIdx: -1 }];
+  for (let i = 1; i < clusterCount; i++) {
+    const parentIdx = Math.floor(rand(0, clusters.length));
+    const parent = clusters[parentIdx];
+    const radius = rand(0.5, 1.0);
+    const dir = randomUnitVector3();
+    const dist = (parent.radius + radius) * rand(0.55, 0.88);
+    const center = [
+      parent.center[0] + dir[0] * dist,
+      parent.center[1] + dir[1] * dist,
+      parent.center[2] + dir[2] * dist,
+    ];
+    clusters.push({ center, radius, parentIdx });
+  }
+
+  // クラスター全体をだいたい原点中心に収める
+  const centroid = [0, 0, 0];
+  for (const c of clusters) { centroid[0] += c.center[0]; centroid[1] += c.center[1]; centroid[2] += c.center[2]; }
+  centroid[0] /= clusters.length; centroid[1] /= clusters.length; centroid[2] /= clusters.length;
+  for (const c of clusters) {
+    c.center = [c.center[0] - centroid[0], c.center[1] - centroid[1], c.center[2] - centroid[2]];
+  }
+
+  let boundingRadius = 0;
+  for (const c of clusters) boundingRadius = Math.max(boundingRadius, Math.hypot(...c.center) + c.radius);
+
+  // --- 2. 各クラスターの中に、ランダムな方向・ランダムな距離で点をばらまく ---
+  const positions = [];
+  const centers = [];
+  const seeds = [];
+  const params = [];
+  const bridgeFlags = []; // 初期値はすべて0。実際の接続点は毎フレーム動的に決まる
+  const pointMeta = [];   // 動的な接続判定で使う、点ごとのノイズパラメータ
+  const pointsByCluster = [];
+
+  clusters.forEach((cluster) => {
+    const seed = [rand(-25, 25), rand(-25, 25), rand(-25, 25)];
+    const amp = rand(0.15, 0.5);
+    const freq = rand(0.8, 2.6);
+    const jseed = rand(0, 100);
+    const idxList = [];
+
+    for (let p = 0; p < pointsPerCluster; p++) {
+      const dir = randomUnitVector3();
+      // 完全な球面ではなく、中心からの距離もランダムにすることで
+      // "整った球"に見えないようにする
+      const scale = cluster.radius * rand(0.4, 1.05);
+      const globalIndex = positions.length / 3;
+
+      positions.push(dir[0], dir[1], dir[2]);
+      centers.push(cluster.center[0], cluster.center[1], cluster.center[2]);
+      seeds.push(seed[0], seed[1], seed[2]);
+      params.push(scale, amp, freq, jseed);
+      bridgeFlags.push(0);
+      pointMeta.push({ center: cluster.center, seed, amp, freq, jseed, radius: scale, dir });
+      idxList.push(globalIndex);
+    }
+    pointsByCluster.push(idxList);
+  });
+
+  // --- 3. すべての点について、"近くにありそうな"候補ペアを探しておく ---
+  // クラスター内・クラスター間を区別せず、レスト姿勢(ノイズ変形前)での
+  // 距離だけを基準に、近い点同士を接続候補としてプールする。
+  // 実際に線として描画されるかどうかは、evaluateConnections() が
+  // 毎フレーム(間引いて)ノイズ変形後の"今の"距離で判定する。
+  const restWorld = pointMeta.map((m) => [
+    m.center[0] + m.dir[0] * m.radius,
+    m.center[1] + m.dir[1] * m.radius,
+    m.center[2] + m.dir[2] * m.radius,
+  ]);
+
+  const MAX_NEIGHBORS_PER_POINT = 5;
+  const SEARCH_RADIUS = boundingRadius * 0.42; // この範囲内にある点だけを候補にする
+  const SEARCH_RADIUS_SQ = SEARCH_RADIUS * SEARCH_RADIUS;
+
+  // どのクラスター同士が(重なり合っていて)互いに近い可能性があるかを
+  // 先に一度だけ求めておく(全点総当たりを避けるための足切り)。
+  const clusterNeighbors = clusters.map(() => []);
+  for (let ci = 0; ci < clusters.length; ci++) {
+    for (let cj = ci; cj < clusters.length; cj++) {
+      const a = clusters[ci], b = clusters[cj];
+      const centerDist = Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1], a.center[2] - b.center[2]);
+      if (ci !== cj && centerDist > a.radius + b.radius + SEARCH_RADIUS * 2) continue;
+      clusterNeighbors[ci].push(cj);
+      if (ci !== cj) clusterNeighbors[cj].push(ci);
+    }
+  }
+
+  // 各点ごとに、"クラスターペアをまたいで"最も近いMAX_NEIGHBORS_PER_POINT個
+  // だけを候補にする(以前はクラスターペアごとに独立して上位5件を選んでいた
+  // ため、重なり合うクラスターが多いほど1点あたりの候補数が際限なく増え、
+  // カオス度を上げたときに接続線が過密になりすぎる問題があった)。
+  const bridgeCandidates = [];
+  for (let ci = 0; ci < clusters.length; ci++) {
+    for (const ia of pointsByCluster[ci]) {
+      const pa = restWorld[ia];
+      const neighborBuf = [];
+      for (const cj of clusterNeighbors[ci]) {
+        for (const ib of pointsByCluster[cj]) {
+          if (ib <= ia) continue; // 自己ペア・重複ペアを避ける
+          const pb = restWorld[ib];
+          const dx = pa[0] - pb[0], dy = pa[1] - pb[1], dz = pa[2] - pb[2];
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < SEARCH_RADIUS_SQ) neighborBuf.push([d2, ib]);
+        }
+      }
+      neighborBuf.sort((x, y) => x[0] - y[0]);
+      for (const [, ib] of neighborBuf.slice(0, MAX_NEIGHBORS_PER_POINT)) {
+        const baseThreshold = (pointMeta[ia].radius + pointMeta[ib].radius) * 0.14;
+        bridgeCandidates.push({ globalA: ia, globalB: ib, baseThreshold });
+      }
+    }
+  }
+
+  // --- 4. 常時表示される固定の"骨格ライン"を作る ---
+  // 上のbridgeCandidatesはカオス度に応じて動的に繋がったり切れたり
+  // する接続だが、それとは別に、各クラスター内で最も近い点同士を
+  // 生成時に一度だけ結んでおく「土台となる骨格」を用意する。
+  // これは接続状態に関わらず常に描画され続けるので、点群がバラバラの
+  // ランダムな配置になっても、視覚的な"構造"が失われないようにする。
+  // (このラインもノイズ変形後の頂点座標を使って描画されるため、
+  //  形が呼吸するように揺れ動く点は変わらない)
+  const SKELETON_NEIGHBORS = 2;
+  const skeletonEdgeSet = new Set();
+  const skeletonEdges = [];
+  for (const idxList of pointsByCluster) {
+    for (const ia of idxList) {
+      const pa = restWorld[ia];
+      const neighborBuf = [];
+      for (const ib of idxList) {
+        if (ib === ia) continue;
+        const pb = restWorld[ib];
+        const dx = pa[0] - pb[0], dy = pa[1] - pb[1], dz = pa[2] - pb[2];
+        neighborBuf.push([dx * dx + dy * dy + dz * dz, ib]);
+      }
+      neighborBuf.sort((x, y) => x[0] - y[0]);
+      for (const [, ib] of neighborBuf.slice(0, SKELETON_NEIGHBORS)) {
+        const key = ia < ib ? ia + "_" + ib : ib + "_" + ia;
+        if (skeletonEdgeSet.has(key)) continue;
+        skeletonEdgeSet.add(key);
+        skeletonEdges.push(ia, ib);
+      }
+    }
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    centers: new Float32Array(centers),
+    seeds: new Float32Array(seeds),
+    params: new Float32Array(params),
+    bridgeFlags: new Float32Array(bridgeFlags),
+    bridgeCandidates,
+    skeletonEdges: new Uint32Array(skeletonEdges),
+    pointMeta,
+    vertexCount: positions.length / 3,
+    clusterCount: clusters.length,
+    boundingRadius,
+  };
+}
+
+// ============================================================
+// 頂点シェーダーと同じノイズ変形を JavaScript 側でも再現する
+// (点同士が"今まさに近づいているかどうか"を判定するために使用。
+//  実際に描画される座標は常に本物のGPU側の計算結果を使うため、
+//  ここでの近似誤差が見た目のズレを生むことはない)
+// ============================================================
+function mod289(x) { return x - Math.floor(x * (1.0 / 289.0)) * 289.0; }
+function permute(x) { return mod289(((x * 34.0) + 1.0) * x); }
+function taylorInvSqrt(r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+function snoise3(vx, vy, vz) {
+  const C1 = 1.0 / 6.0, C2 = 1.0 / 3.0;
+  const s = (vx + vy + vz) * C2;
+  let ix = Math.floor(vx + s), iy = Math.floor(vy + s), iz = Math.floor(vz + s);
+  const g = (ix + iy + iz) * C1;
+  const x0x = vx - ix + g, x0y = vy - iy + g, x0z = vz - iz + g;
+
+  const gx = x0x >= x0y ? 1.0 : 0.0;
+  const gy = x0y >= x0z ? 1.0 : 0.0;
+  const gz = x0z >= x0x ? 1.0 : 0.0;
+  const lx = 1.0 - gx, ly = 1.0 - gy, lz = 1.0 - gz;
+
+  const i1x = Math.min(gx, lz), i1y = Math.min(gy, lx), i1z = Math.min(gz, ly);
+  const i2x = Math.max(gx, lz), i2y = Math.max(gy, lx), i2z = Math.max(gz, ly);
+
+  const x1x = x0x - i1x + C1, x1y = x0y - i1y + C1, x1z = x0z - i1z + C1;
+  const x2x = x0x - i2x + C2, x2y = x0y - i2y + C2, x2z = x0z - i2z + C2;
+  const x3x = x0x - 0.5, x3y = x0y - 0.5, x3z = x0z - 0.5;
+
+  ix = mod289(ix); iy = mod289(iy); iz = mod289(iz);
+
+  let p0 = permute(iz + 0.0), p1 = permute(iz + i1z), p2 = permute(iz + i2z), p3 = permute(iz + 1.0);
+  p0 = permute(p0 + iy + 0.0); p1 = permute(p1 + iy + i1y); p2 = permute(p2 + iy + i2y); p3 = permute(p3 + iy + 1.0);
+  p0 = permute(p0 + ix + 0.0); p1 = permute(p1 + ix + i1x); p2 = permute(p2 + ix + i2x); p3 = permute(p3 + ix + 1.0);
+
+  const n_ = 0.142857142857;
+  const nsx = 2.0 * n_, nsy = 0.5 * n_ - 1.0, nsz = n_;
+
+  const P = [p0, p1, p2, p3];
+  const J = P.map((p) => p - 49.0 * Math.floor(p * nsz * nsz));
+  const Xu = J.map((j) => Math.floor(j * nsz));
+  const Yu = J.map((j, idx) => Math.floor(j - 7.0 * Xu[idx]));
+  const X = Xu.map((xu) => xu * nsx + nsy);
+  const Y = Yu.map((yu) => yu * nsx + nsy);
+  const H = X.map((x, idx) => 1.0 - Math.abs(x) - Math.abs(Y[idx]));
+
+  const b0 = [X[0], X[1], Y[0], Y[1]];
+  const b1 = [X[2], X[3], Y[2], Y[3]];
+  const s0 = b0.map((v) => Math.floor(v) * 2.0 + 1.0);
+  const s1 = b1.map((v) => Math.floor(v) * 2.0 + 1.0);
+  const sh = H.map((h) => (h <= 0.0 ? -1.0 : 0.0));
+
+  const a0 = [b0[0] + s0[0] * sh[0], b0[2] + s0[2] * sh[0], b0[1] + s0[1] * sh[1], b0[3] + s0[3] * sh[1]];
+  const a1 = [b1[0] + s1[0] * sh[2], b1[2] + s1[2] * sh[2], b1[1] + s1[1] * sh[3], b1[3] + s1[3] * sh[3]];
+
+  let g0 = [a0[0], a0[1], H[0]];
+  let g1 = [a0[2], a0[3], H[1]];
+  let g2 = [a1[0], a1[1], H[2]];
+  let g3 = [a1[2], a1[3], H[3]];
+
+  const dp3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const n0 = taylorInvSqrt(dp3(g0, g0)), n1 = taylorInvSqrt(dp3(g1, g1)), n2 = taylorInvSqrt(dp3(g2, g2)), n3 = taylorInvSqrt(dp3(g3, g3));
+  g0 = g0.map((v) => v * n0); g1 = g1.map((v) => v * n1); g2 = g2.map((v) => v * n2); g3 = g3.map((v) => v * n3);
+
+  const X0 = [x0x, x0y, x0z], X1 = [x1x, x1y, x1z], X2 = [x2x, x2y, x2z], X3 = [x3x, x3y, x3z];
+  let m0 = Math.max(0.6 - dp3(X0, X0), 0.0);
+  let m1 = Math.max(0.6 - dp3(X1, X1), 0.0);
+  let m2 = Math.max(0.6 - dp3(X2, X2), 0.0);
+  let m3 = Math.max(0.6 - dp3(X3, X3), 0.0);
+  m0 *= m0; m1 *= m1; m2 *= m2; m3 *= m3;
+
+  return 42.0 * (m0 * m0 * dp3(g0, X0) + m1 * m1 * dp3(g1, X1) + m2 * m2 * dp3(g2, X2) + m3 * m3 * dp3(g3, X3));
+}
+
+function fbm3(x, y, z) {
+  let sum = 0.0, amp = 0.5, freq = 1.0;
+  for (let i = 0; i < 4; i++) {
+    sum += amp * snoise3(x * freq, y * freq, z * freq);
+    amp *= 0.5;
+    freq *= 2.0;
+  }
+  return sum;
+}
+
+// 頂点シェーダーの main() と同じ式で、ある点の"今の"ワールド座標を求める
+function computeDisplacedWorldPos(dir, meta, elapsedSec, ampMul, freqMul, spikiness) {
+  const freq = meta.freq * freqMul;
+  const amp = meta.amp * ampMul;
+
+  const sx = dir[0] * freq + meta.seed[0] + elapsedSec * 0.10;
+  const sy = dir[1] * freq + meta.seed[1] + elapsedSec * 0.08;
+  const sz = dir[2] * freq + meta.seed[2] + elapsedSec * 0.13;
+  let n = fbm3(sx, sy, sz);
+
+  const tx = dir[0] * 5.0 + meta.seed[0] * 2.3 + meta.jseed + elapsedSec * 0.6;
+  const ty = dir[1] * 5.0 + meta.seed[1] * 2.3 + meta.jseed + elapsedSec * 0.6;
+  const tz = dir[2] * 5.0 + meta.seed[2] * 2.3 + meta.jseed + elapsedSec * 0.6;
+  const turb = snoise3(tx, ty, tz);
+  const spike = Math.sign(turb) * Math.pow(Math.abs(turb), 3.0);
+  n += spike * spikiness;
+
+  const radius = meta.radius * (1.0 + n * amp);
+  return [
+    meta.center[0] + dir[0] * radius,
+    meta.center[1] + dir[1] * radius,
+    meta.center[2] + dir[2] * radius,
+  ];
+}
+
+// ============================================================
+// メイン処理
+// ============================================================
+async function main() {
+  const canvas = document.getElementById("glcanvas");
+  const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
+
+  if (!gl) {
+    showFatalError(
+      "WebGL2 を初期化できませんでした。\n" +
+      "お使いのブラウザ / GPU ドライバが WebGL2 に対応しているかご確認ください。\n" +
+      "(最新版の Chrome / Edge / Firefox 推奨)"
+    );
+    return;
+  }
+
+  // --- sphere.glsl の読み込み(失敗時は埋め込みフォールバックを使用) ---
+  let vertexSrc = FALLBACK_VERTEX_SRC;
+  let fragmentSrc = FALLBACK_FRAGMENT_SRC;
+  try {
+    const res = await fetch("./sphere.glsl");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const text = await res.text();
+    const vPart = text.split("// ---VERTEX---")[1];
+    const [vSrc, fSrc] = vPart.split("// ---FRAGMENT---");
+    if (!vSrc || !fSrc) throw new Error("sphere.glsl の形式が想定と異なります");
+    vertexSrc = vSrc.trim();
+    fragmentSrc = fSrc.trim();
+  } catch (err) {
+    showNotice(
+      "sphere.glsl を読み込めなかったため、埋め込み済みの同一シェーダーで表示しています。" +
+      "外部ファイルとして確認する場合は、簡易サーバー経由で開いてください" +
+      "(例: python3 -m http.server → http://localhost:8000/ )。 [" + err.message + "]"
+    );
+  }
+
+  // --- シェーダーのコンパイル / リンク ---
+  function compileShader(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(shader);
+      gl.deleteShader(shader);
+      throw new Error("シェーダーのコンパイルに失敗しました:\n" + log);
+    }
+    return shader;
+  }
+
+  let program;
+  try {
+    const vShader = compileShader(gl.VERTEX_SHADER, vertexSrc);
+    const fShader = compileShader(gl.FRAGMENT_SHADER, fragmentSrc);
+    program = gl.createProgram();
+    gl.attachShader(program, vShader);
+    gl.attachShader(program, fShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      throw new Error("プログラムのリンクに失敗しました:\n" + gl.getProgramInfoLog(program));
+    }
+  } catch (err) {
+    showFatalError(err.message);
+    return;
+  }
+  gl.useProgram(program);
+
+  // --- attribute / uniform ロケーション ---
+  const loc = {
+    aPosition: gl.getAttribLocation(program, "aPosition"),
+    aCenter: gl.getAttribLocation(program, "aCenter"),
+    aSeed: gl.getAttribLocation(program, "aSeed"),
+    aParams: gl.getAttribLocation(program, "aParams"),
+    aBridge: gl.getAttribLocation(program, "aBridge"),
+    uProjectionMatrix: gl.getUniformLocation(program, "uProjectionMatrix"),
+    uModelViewMatrix: gl.getUniformLocation(program, "uModelViewMatrix"),
+    uTime: gl.getUniformLocation(program, "uTime"),
+    uAmpMultiplier: gl.getUniformLocation(program, "uAmpMultiplier"),
+    uFreqMultiplier: gl.getUniformLocation(program, "uFreqMultiplier"),
+    uSpikiness: gl.getUniformLocation(program, "uSpikiness"),
+    uPulse: gl.getUniformLocation(program, "uPulse"),
+    uPointSize: gl.getUniformLocation(program, "uPointSize"),
+    uMode: gl.getUniformLocation(program, "uMode"),
+    uColorLow: gl.getUniformLocation(program, "uColorLow"),
+    uColorHigh: gl.getUniformLocation(program, "uColorHigh"),
+    uOpacity: gl.getUniformLocation(program, "uOpacity"),
+  };
+
+  // --- バッファ ---
+  // 点群は常に全点を drawArrays で描画するのでインデックスバッファは不要。
+  // 骨格ライン(skeletonIndexBuffer)は生成時に一度だけ決める固定の
+  // ELEMENT_ARRAY_BUFFER。接続ライン(connectionIndexBuffer)は、
+  // 近づいた点同士を動的に結ぶための ELEMENT_ARRAY_BUFFER。
+  const positionBuffer = gl.createBuffer();
+  const centerBuffer = gl.createBuffer();
+  const seedBuffer = gl.createBuffer();
+  const paramsBuffer = gl.createBuffer();
+  const bridgeBuffer = gl.createBuffer();
+  const skeletonIndexBuffer = gl.createBuffer();
+  const connectionIndexBuffer = gl.createBuffer();
+
+  const vaoPoints = gl.createVertexArray();
+  const vaoSkeleton = gl.createVertexArray();
+  const vaoConnections = gl.createVertexArray();
+
+  function bindAttribs() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.enableVertexAttribArray(loc.aPosition);
+    gl.vertexAttribPointer(loc.aPosition, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, centerBuffer);
+    gl.enableVertexAttribArray(loc.aCenter);
+    gl.vertexAttribPointer(loc.aCenter, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, seedBuffer);
+    gl.enableVertexAttribArray(loc.aSeed);
+    gl.vertexAttribPointer(loc.aSeed, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, paramsBuffer);
+    gl.enableVertexAttribArray(loc.aParams);
+    gl.vertexAttribPointer(loc.aParams, 4, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bridgeBuffer);
+    gl.enableVertexAttribArray(loc.aBridge);
+    gl.vertexAttribPointer(loc.aBridge, 1, gl.FLOAT, false, 0, 0);
+  }
+
+  let vertexCount = 0;
+  let connectionIndexCount = 0;
+  let connectionPointCount = 0;
+  let skeletonIndexCount = 0;
+  let boundingRadius = 2;
+
+  let lastVertexCount = 0;
+  let lastClusterCount = 0;
+  let lastBridgeCandidates = [];
+  let lastPointMeta = [];
+
+  function updateStatLine() {
+    document.getElementById("statLine").textContent =
+      "クラスター: " + lastClusterCount +
+      " / 点: " + lastVertexCount.toLocaleString() +
+      " / 骨格ライン: " + (skeletonIndexCount / 2).toLocaleString() + "本" +
+      " / 動的接続: " + (connectionIndexCount / 2).toLocaleString() + "本(" + connectionPointCount.toLocaleString() + "点)";
+  }
+
+  // ============================================================
+  // 点同士の"今この瞬間"の接続を動的に判定する。
+  // 候補プールの各ペアについて、頂点シェーダーと同じノイズ変形を
+  // JS側で再現した実際の(現在の)ワールド座標を求め、距離が
+  // しきい値より近ければ接続ラインとして描画する。
+  // 「変形の強さ」「ノイズの粗さ」「カオス度」のスライダー値を
+  // そのまま使うので、カオスが大きいほど点がよく動き回り、
+  // 接続が生まれたり消えたりする頻度・本数も自然に変化する。
+  // ============================================================
+  function evaluateConnections(elapsedSec) {
+    if (!lastBridgeCandidates.length) {
+      connectionIndexCount = 0;
+      connectionPointCount = 0;
+      return;
+    }
+    const ampMul = parseFloat(ampRange.value);
+    const freqMul = parseFloat(freqRange.value);
+    const spikiness = parseFloat(chaosRange.value);
+
+    // 接続の"つながりやすさ"そのものを、変形の強さ(ampMul)とカオス度
+    // (spikiness)に応じて拡大・縮小する。カオスさが低いほど接続は
+    // ごく一部の最も近い候補しか繋がらず、高いほど広い範囲の候補が
+    // 次々と繋がっては切れる。
+    const thresholdScale = Math.min(20, 0.06 + Math.pow(spikiness, 2) * 3.5 + Math.max(0, ampMul - 1) * 3.0);
+
+    const activeEdges = [];
+    const activeFlags = new Float32Array(lastVertexCount);
+    const activePointSet = new Set();
+
+    for (const cand of lastBridgeCandidates) {
+      const metaA = lastPointMeta[cand.globalA];
+      const metaB = lastPointMeta[cand.globalB];
+      const pa = computeDisplacedWorldPos(metaA.dir, metaA, elapsedSec, ampMul, freqMul, spikiness);
+      const pb = computeDisplacedWorldPos(metaB.dir, metaB, elapsedSec, ampMul, freqMul, spikiness);
+      const dx = pa[0] - pb[0], dy = pa[1] - pb[1], dz = pa[2] - pb[2];
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist < cand.baseThreshold * thresholdScale) {
+        activeEdges.push(cand.globalA, cand.globalB);
+        activeFlags[cand.globalA] = 1;
+        activeFlags[cand.globalB] = 1;
+        activePointSet.add(cand.globalA);
+        activePointSet.add(cand.globalB);
+      }
+    }
+
+    connectionIndexCount = activeEdges.length;
+    connectionPointCount = activePointSet.size;
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, connectionIndexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(activeEdges), gl.DYNAMIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bridgeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, activeFlags, gl.DYNAMIC_DRAW);
+
+    updateStatLine();
+  }
+
+  function uploadGeometry(clusterCount, pointsPerCluster) {
+    const c = buildCluster(clusterCount, pointsPerCluster);
+    vertexCount = c.vertexCount;
+    boundingRadius = c.boundingRadius;
+
+    lastVertexCount = c.vertexCount;
+    lastClusterCount = c.clusterCount;
+    lastBridgeCandidates = c.bridgeCandidates;
+    lastPointMeta = c.pointMeta;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, c.positions, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, centerBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, c.centers, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, seedBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, c.seeds, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, paramsBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, c.params, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bridgeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, c.bridgeFlags, gl.DYNAMIC_DRAW);
+
+    gl.bindVertexArray(vaoPoints);
+    bindAttribs();
+
+    // 骨格ラインは生成時の点配置から一度だけ決まる固定インデックス。
+    // 接続状態(aBridge)には左右されず、常に一定本数を描画し続ける。
+    skeletonIndexCount = c.skeletonEdges.length;
+    gl.bindVertexArray(vaoSkeleton);
+    bindAttribs();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, skeletonIndexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, c.skeletonEdges, gl.STATIC_DRAW);
+
+    gl.bindVertexArray(vaoConnections);
+    bindAttribs();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, connectionIndexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(0), gl.DYNAMIC_DRAW);
+
+    gl.bindVertexArray(null);
+
+    evaluateConnections(performance.now() / 1000);
+  }
+
+  // --- UI 要素 ---
+  const countRange = document.getElementById("countRange");
+  const countLabel = document.getElementById("countLabel");
+  const ppcRange = document.getElementById("ppcRange");
+  const ppcLabel = document.getElementById("ppcLabel");
+  const ampRange = document.getElementById("ampRange");
+  const ampLabel = document.getElementById("ampLabel");
+  const freqRange = document.getElementById("freqRange");
+  const freqLabel = document.getElementById("freqLabel");
+  const chaosRange = document.getElementById("chaosRange");
+  const chaosLabel = document.getElementById("chaosLabel");
+  const sizeRange = document.getElementById("sizeRange");
+  const sizeLabel = document.getElementById("sizeLabel");
+  const zoomRange = document.getElementById("zoomRange");
+  const zoomLabel = document.getElementById("zoomLabel");
+  const pointsToggle = document.getElementById("pointsToggle");
+  const skeletonToggle = document.getElementById("skeletonToggle");
+  const linesToggle = document.getElementById("linesToggle");
+  const rotateToggle = document.getElementById("rotateToggle");
+  const dynamicToggle = document.getElementById("dynamicToggle");
+  const reshuffleBtn = document.getElementById("reshuffleBtn");
+
+  let pulseStart = performance.now() - 10000; // 起動直後は控えめに
+
+  function regenerate() {
+    uploadGeometry(parseInt(countRange.value, 10), parseInt(ppcRange.value, 10));
+    pulseStart = performance.now();
+  }
+
+  countRange.addEventListener("input", () => { countLabel.textContent = countRange.value; regenerate(); });
+  ppcRange.addEventListener("input", () => { ppcLabel.textContent = ppcRange.value; regenerate(); });
+  ampRange.addEventListener("input", () => { ampLabel.textContent = ampRange.value; });
+  freqRange.addEventListener("input", () => { freqLabel.textContent = freqRange.value; });
+  chaosRange.addEventListener("input", () => { chaosLabel.textContent = chaosRange.value; });
+  zoomRange.addEventListener("input", () => { zoomLabel.textContent = zoomRange.value; });
+  sizeRange.addEventListener("input", () => { sizeLabel.textContent = sizeRange.value; });
+  reshuffleBtn.addEventListener("click", regenerate);
+
+  regenerate();
+
+  // --- マウス / タッチによる視点回転(ドラッグ分の蓄積値) ---
+  let dragAngleX = -0.3;
+  let dragAngleY = 0.6;
+  let dragging = false;
+  let lastX = 0, lastY = 0;
+
+  function pointerDown(x, y) { dragging = true; lastX = x; lastY = y; }
+  function pointerMove(x, y) {
+    if (!dragging) return;
+    dragAngleY += (x - lastX) * 0.008;
+    dragAngleX += (y - lastY) * 0.008;
+    dragAngleX = Math.max(-1.5, Math.min(1.5, dragAngleX));
+    lastX = x; lastY = y;
+  }
+  function pointerUp() { dragging = false; }
+
+  canvas.addEventListener("mousedown", (e) => pointerDown(e.clientX, e.clientY));
+  window.addEventListener("mousemove", (e) => pointerMove(e.clientX, e.clientY));
+  window.addEventListener("mouseup", pointerUp);
+  canvas.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    pointerDown(t.clientX, t.clientY);
+  }, { passive: true });
+  canvas.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    pointerMove(t.clientX, t.clientY);
+  }, { passive: true });
+  canvas.addEventListener("touchend", pointerUp);
+
+  // --- リサイズ対応 ---
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.floor(canvas.clientWidth * dpr);
+    const h = Math.floor(canvas.clientHeight * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // --- 描画設定: 加算合成でグローっぽく光らせる、深度は使わず"透けて見える"骨格に ---
+  gl.disable(gl.DEPTH_TEST);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.clearColor(0.008, 0.01, 0.02, 1.0);
+  gl.lineWidth(2); // 多くの実装では1pxにクランプされるが、念のため指定
+
+  // --- 描画ループ ---
+  const projectionMatrix = new Float32Array(16);
+  const viewMatrix = new Float32Array(16);
+  const modelMatrix = new Float32Array(16);
+  const rotX = new Float32Array(16);
+  const rotY = new Float32Array(16);
+  const rotation = new Float32Array(16);
+  const translation = new Float32Array(16);
+  const modelViewMatrix = new Float32Array(16);
+
+  const startTime = performance.now();
+  let objectSpinY = 0; // オブジェクト自身の自律的な回転(カメラの動きとは独立)
+  let lastConnectionEvalMs = 0;
+  const CONNECTION_EVAL_INTERVAL_MS = 200; // 接続判定は毎フレームではなく間引いて実行(負荷軽減)
+
+  function render(nowMs) {
+    resize();
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const elapsedSec = (nowMs - startTime) / 1000;
+    const pulseT = Math.min((nowMs - pulseStart) / 900, 1);
+    const pulse = 1 - pulseT * pulseT * (3 - 2 * pulseT); // イージングして減衰
+    const dynamicOn = dynamicToggle.checked;
+
+    // 点のカオスさ(変形の強さ・ノイズの粗さ・カオス度)に応じて、
+    // 点が実際に近づいた/離れた瞬間を再判定し、接続を動的に更新する
+    if (nowMs - lastConnectionEvalMs > CONNECTION_EVAL_INTERVAL_MS) {
+      evaluateConnections(elapsedSec);
+      lastConnectionEvalMs = nowMs;
+    }
+
+    // カメラは常にドラッグ + 自動回転で軌道角(orbitAngle/orbitTilt)を持ち、
+    // "躍動感カメラ"がONのときはさらに手持ち風のドリフトと呼吸(距離の伸縮)、
+    // 上下の首振りウォブルが加わる
+    const rotSpeed = 0.0034 * (dynamicOn ? (1 + 0.5 * Math.sin(elapsedSec * 0.4)) : 1);
+    if (rotateToggle.checked && !dragging) {
+      dragAngleY += rotSpeed;
+    }
+    const wobbleX = dynamicOn ? Math.sin(elapsedSec * 0.35) * 0.16 : 0;
+    const orbitAngle = dragAngleY;
+    const orbitTilt = Math.max(-1.4, Math.min(1.4, dragAngleX + wobbleX));
+
+    const breathing = dynamicOn ? 1 + Math.sin(elapsedSec * 0.6) * 0.1 : 1;
+    const zoomFactor = parseFloat(zoomRange.value);
+    const fov = (70 * Math.PI) / 180; // 広角のFOVで近距離でも迫力のある画角にする
+    const rawRadius = (boundingRadius / Math.tan(fov / 2)) * zoomFactor * breathing;
+    const camOrbitRadius = Math.min(Math.max(rawRadius, 0.9), 12.0);
+
+    // オブジェクト(クラスター全体)自体も、ゆっくり自転しながら空間内を浮遊するように動かす
+    if (dynamicOn) objectSpinY += 0.0013;
+    const objSpinWobbleX = dynamicOn ? Math.sin(elapsedSec * 0.24) * 0.09 : 0;
+    const objDriftAmp = dynamicOn ? boundingRadius * 0.32 : 0;
+    const objectPos = [
+      Math.sin(elapsedSec * 0.13 + 0.8) * objDriftAmp,
+      Math.sin(elapsedSec * 0.10) * objDriftAmp * 0.7,
+      Math.sin(elapsedSec * 0.16 + 2.1) * objDriftAmp * 0.5,
+    ];
+
+    // カメラ自身も、軌道運動に加えて手持ち風の細かいドリフトで揺れる
+    const camDriftAmp = dynamicOn ? camOrbitRadius * 0.16 : 0;
+    const camDrift = [
+      Math.sin(elapsedSec * 0.27) * camDriftAmp,
+      Math.sin(elapsedSec * 0.21 + 1.4) * camDriftAmp * 0.6,
+      Math.sin(elapsedSec * 0.33 + 0.6) * camDriftAmp * 0.5,
+    ];
+
+    const eye = [
+      objectPos[0] + camOrbitRadius * Math.cos(orbitTilt) * Math.sin(orbitAngle) + camDrift[0],
+      objectPos[1] + camOrbitRadius * Math.sin(orbitTilt) + camDrift[1],
+      objectPos[2] + camOrbitRadius * Math.cos(orbitTilt) * Math.cos(orbitAngle) + camDrift[2],
+    ];
+
+    mat4Perspective(projectionMatrix, fov, canvas.width / canvas.height, 0.05, 100);
+    mat4LookAt(viewMatrix, eye, objectPos, [0, 1, 0]);
+
+    mat4RotationY(rotY, objectSpinY);
+    mat4RotationX(rotX, objSpinWobbleX);
+    mat4Multiply(rotation, rotY, rotX);
+    mat4Translation(translation, objectPos[0], objectPos[1], objectPos[2]);
+    mat4Multiply(modelMatrix, translation, rotation);
+    mat4Multiply(modelViewMatrix, viewMatrix, modelMatrix);
+
+    gl.useProgram(program);
+    gl.uniformMatrix4fv(loc.uProjectionMatrix, false, projectionMatrix);
+    gl.uniformMatrix4fv(loc.uModelViewMatrix, false, modelViewMatrix);
+    gl.uniform1f(loc.uTime, elapsedSec);
+    gl.uniform1f(loc.uAmpMultiplier, parseFloat(ampRange.value));
+    gl.uniform1f(loc.uFreqMultiplier, parseFloat(freqRange.value));
+    gl.uniform1f(loc.uSpikiness, parseFloat(chaosRange.value));
+    gl.uniform1f(loc.uPulse, Math.max(0, pulse));
+    gl.uniform1f(loc.uPointSize, parseFloat(sizeRange.value));
+
+    if (skeletonToggle.checked) {
+      // 常時表示の骨格ライン(生成時に固定、接続の有無に左右されない)
+      gl.bindVertexArray(vaoSkeleton);
+      gl.uniform1i(loc.uMode, 0);
+      gl.uniform3f(loc.uColorLow, 0.30, 0.42, 0.62);
+      gl.uniform3f(loc.uColorHigh, 0.45, 0.62, 0.85);
+      gl.uniform1f(loc.uOpacity, 0.35);
+      gl.drawElements(gl.LINES, skeletonIndexCount, gl.UNSIGNED_INT, 0);
+    }
+
+    if (linesToggle.checked) {
+      // カオス度に応じて動的に繋がったり切れたりする接続ライン
+      gl.bindVertexArray(vaoConnections);
+      gl.uniform1i(loc.uMode, 0);
+      gl.uniform3f(loc.uColorLow, 0.85, 0.55, 0.20);
+      gl.uniform3f(loc.uColorHigh, 1.0, 0.85, 0.45);
+      gl.uniform1f(loc.uOpacity, 0.75);
+      gl.drawElements(gl.LINES, connectionIndexCount, gl.UNSIGNED_INT, 0);
+    }
+
+    if (pointsToggle.checked) {
+      gl.bindVertexArray(vaoPoints);
+      gl.uniform1i(loc.uMode, 1);
+      gl.uniform3f(loc.uColorLow, 0.35, 0.55, 1.0);
+      gl.uniform3f(loc.uColorHigh, 0.55, 1.0, 1.0);
+      gl.uniform1f(loc.uOpacity, 0.95);
+      gl.drawArrays(gl.POINTS, 0, vertexCount);
+    }
+
+    gl.bindVertexArray(null);
+
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+}
+
+function showFatalError(message) {
+  const el = document.getElementById("glError");
+  el.textContent = message;
+  el.style.display = "flex";
+}
+function showNotice(message) {
+  const el = document.getElementById("notice");
+  el.textContent = message;
+  el.style.display = "block";
+}
+
+main();
+</script>
+</body>
+</html>

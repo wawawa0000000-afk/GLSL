@@ -1,0 +1,57 @@
+// ============================================================
+// Image タブ：雨粒ポストプロセス
+// ------------------------------------------------------------
+// iChannel0 = Buffer A（顔＋市松模様シーンのレンダリング結果）を設定してください。
+//   Buffer A の iChannel0 設定: Filter = Linear, Wrap = Clamp to edge
+//
+// 元ネタ: Author: Élie Michel / License: CC BY 3.0 / July 2017
+// 改変: checkerColor() で市松模様を直接生成する代わりに、
+//       Buffer A（顔＋市松模様シーン）をサンプリングするように変更。
+//       雨粒がシーン全体（顔もろとも）を屈折させて見せるポストプロセスとして動作する。
+// ============================================================
+
+// ---- 疑似乱数・ハッシュ関数（雨粒の配置・タイミング用。旧: iChannel1のノイズテクスチャの代替） ----
+vec2 hash2(vec2 p)
+{
+    p = vec2( dot(p,vec2(127.1,311.7)),
+              dot(p,vec2(269.5,183.3)) );
+    return fract(sin(p)*43758.5453123);
+}
+vec4 hash4(vec2 p)
+{
+    vec4 q = vec4( dot(p,vec2(127.1,311.7)),
+                   dot(p,vec2(269.5,183.3)),
+                   dot(p,vec2(419.2,371.9)),
+                   dot(p,vec2(113.5,271.9)) );
+    return fract(sin(q)*43758.5453123);
+}
+
+void mainImage( out vec4 f, in vec2 c )
+{
+    vec2 u = c / iResolution.xy;
+    vec2 n = hash2(floor(u * iResolution.xy * .1));  // Displacement (旧: texture(iChannel1, u*.1))
+
+    // ベースの色 = Buffer A（顔＋市松模様シーン）をそのままサンプリング
+    f = texture(iChannel0, u);
+
+    // 大きさの異なる水滴候補を順にループ
+    for (float r = 4. ; r > 0. ; r--) {
+        vec2 x = iResolution.xy * r * .015,  // グリッド上の水滴候補の数
+             p = 6.28 * u * x + (n - .5) * 2.,
+             s = sin(p);
+        // 現在の水滴の性質（旧: texture(iChannel1, round(u*x-0.25)/x)）
+        vec4 d = hash4(round(u * x - 0.25));
+        // 水滴の形とフェード
+        float t = (s.x+s.y) * max(0., 1. - fract(iTime * (d.b + .1) + d.g) * 2.);
+        // d.r -> 水滴のうち一部だけを表示（サイズに応じた密度）
+        if (d.r < (5.-r)*.08 && t > .5) {
+            // ==== 「曲率」を決めているポイント① ====
+            // v の z成分 mix(.9, 40., t-.5) が水滴の盛り上がり(法線のZ方向の急峻さ)を制御。
+            vec3 v = normalize(-vec3(cos(p), mix(.9, 40., t-.5)));
+            // ==== 「曲率」を決めているポイント② ====
+            // v.xy * .9 の係数が屈折によるUVのズレ量＝見た目の歪みの強さを決める。
+            // Buffer A（顔＋背景シーン）そのものを歪めてサンプリングする
+            f = texture(iChannel0, u - v.xy * .9);
+        }
+    }
+}
