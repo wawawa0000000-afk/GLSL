@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GLSL Lab — Shader Gallery</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      color: #c8d0e0;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 40px 40px 20px;
+      border-bottom: 1px solid #1e2a3a;
+    }
+    header h1 {
+      font-size: 2rem;
+      letter-spacing: 0.15em;
+      color: #7fdfff;
+      text-shadow: 0 0 20px rgba(127, 223, 255, 0.4);
+    }
+    header p {
+      margin-top: 6px;
+      font-size: 0.8rem;
+      color: #445566;
+      letter-spacing: 0.1em;
+    }
+
+    .section { padding: 32px 40px 0; }
+    .section-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      color: #445566;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1e2a3a;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      padding-bottom: 40px;
+    }
+
+    .card {
+      display: block;
+      text-decoration: none;
+      background: #0f1520;
+      border: 1px solid #1e2a3a;
+      border-radius: 8px;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+      position: relative;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent, #7fdfff);
+      opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 2;
+    }
+    .card:hover {
+      border-color: #2e4a6a;
+      box-shadow: 0 0 24px rgba(127, 223, 255, 0.10);
+      transform: translateY(-3px);
+    }
+    .card:hover::before { opacity: 1; }
+
+    .card-preview {
+      width: 100%;
+      height: 160px;
+      position: relative;
+      background: #050810;
+      overflow: hidden;
+    }
+    .card-preview iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      pointer-events: none;
+      display: block;
+      opacity: 0;
+      transition: opacity 0.4s;
+    }
+    .card-preview iframe.ready { opacity: 1; }
+
+    .card-preview .loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #1e3a4a;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      pointer-events: none;
+    }
+
+    .card-body {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-top: 1px solid #1a2535;
+    }
+    .card-tag {
+      font-size: 0.6rem;
+      letter-spacing: 0.12em;
+      color: var(--accent, #7fdfff);
+      text-transform: uppercase;
+      white-space: nowrap;
+      min-width: 64px;
+    }
+    .card-name {
+      font-size: 0.88rem;
+      font-weight: bold;
+      color: #e0eaf8;
+      flex: 1;
+    }
+    .card-arrow {
+      color: #2a3a4a;
+      font-size: 1.1rem;
+      transition: color 0.2s, transform 0.2s;
+    }
+    .card:hover .card-arrow {
+      color: var(--accent, #7fdfff);
+      transform: translateX(3px);
+    }
+
+    /* 区切り線 */
+    .divider {
+      margin: 20px 40px 0;
+      border: none;
+      border-top: 1px dashed #1e2a3a;
+    }
+    .divider-label {
+      margin: 8px 40px 0;
+      font-size: 0.62rem;
+      letter-spacing: 0.18em;
+      color: #2a3a4a;
+      text-transform: uppercase;
+    }
+
+    footer {
+      padding: 24px 40px;
+      border-top: 1px solid #1e2a3a;
+      font-size: 0.7rem;
+      color: #2a3a4a;
+      letter-spacing: 0.1em;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>GLSL Lab</h1>
+  <p>SHADER GALLERY — WebGL / GLSL Experiments</p>
+</header>
+
+<!-- メイン作品 -->
+<div class="section">
+  <div class="section-title">Works</div>
+  <div class="grid">
+
+    <a class="card" href="Test/気球.html" style="--accent:#88ccff;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/気球.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Ray Marching</div>
+        <div class="card-name">気球</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/sliden_boat.html" style="--accent:#ff9944;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/sliden_boat.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Ray Marching</div>
+        <div class="card-name">帆船レース (SDF)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/波打ち際.html" style="--accent:#22ccaa;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/波打ち際.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">2D Shader</div>
+        <div class="card-name">波打ち際とヘリコプターの影</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/スポーツカー.html" style="--accent:#ff4444;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/スポーツカー.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Ray Marching</div>
+        <div class="card-name">スポーツカー (GTクーペ)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/ヘリコプター.html" style="--accent:#00ddaa;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/ヘリコプター.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">2D Shader</div>
+        <div class="card-name">波打ち際 II — ダウンウォッシュ</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/気球2.html" style="--accent:#aaddff;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/気球2.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Ray Marching</div>
+        <div class="card-name">熱気球 (ストライプ)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/気球3.html" style="--accent:#66ccff;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/気球3.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Ray Marching</div>
+        <div class="card-name">熱気球 III (トゥーン+輪郭線)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/帆船2.html" style="--accent:#ff8833;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/帆船2.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Ray Marching</div>
+        <div class="card-name">帆船 II — 夕暮れの道</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- 区切り線 -->
+<hr class="divider">
+<p class="divider-label">Test — 削除予定</p>
+
+<!-- Testページ（削除予定） -->
+<div class="section">
+  <div class="grid">
+
+    <a class="card" href="Test/01_lambert.html" style="--accent:#555566;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/01_lambert.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Test 1</div>
+        <div class="card-name">マット (Lambert 拡散)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/02_toon.html" style="--accent:#555566;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/02_toon.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Test 2</div>
+        <div class="card-name">トゥーンシェーディング</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/03_blinn_phong.html" style="--accent:#555566;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/03_blinn_phong.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Test 3</div>
+        <div class="card-name">光沢 (Blinn-Phong)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/04_metallic.html" style="--accent:#555566;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/04_metallic.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Test 4</div>
+        <div class="card-name">メタリック (環境反射)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+    <a class="card" href="Test/05_glass.html" style="--accent:#555566;">
+      <div class="card-preview">
+        <div class="loading">LOADING...</div>
+        <iframe data-src="Test/05_glass.html"></iframe>
+      </div>
+      <div class="card-body">
+        <div class="card-tag">Test 5</div>
+        <div class="card-name">ガラス・水 (屈折＋フレネル)</div>
+        <span class="card-arrow">›</span>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<footer>GLSL Lab — Local Dev Server &nbsp;|&nbsp; /GLSL</footer>
+
+<script>
+  const HIDE_CSS = `
+    #nav        { display: none !important; }
+    #ui         { display: none !important; }
+    #shader-src { display: none !important; }
+    body > *:not(canvas):not(script):not(style) { pointer-events: none; }
+  `;
+
+  function injectHideCSS(iframe) {
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
+      const style = doc.createElement('style');
+      style.textContent = HIDE_CSS;
+      doc.head.appendChild(style);
+    } catch(e) {}
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const iframe = entry.target.querySelector('iframe[data-src]');
+      if (!iframe) return;
+
+      iframe.src = iframe.dataset.src;
+      iframe.removeAttribute('data-src');
+
+      iframe.addEventListener('load', () => {
+        injectHideCSS(iframe);
+        iframe.classList.add('ready');
+      }, { once: true });
+
+      observer.unobserve(entry.target);
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.card').forEach(card => observer.observe(card));
+</script>
+
+</body>
+</html>

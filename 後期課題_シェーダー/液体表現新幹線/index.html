@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>液体新幹線 N700S — Real Mesh × Viscous Glass</title>
+<style>
+  html,body{ margin:0; padding:0; overflow:hidden; height:100%; background:#000; }
+  canvas{ display:block; width:100vw; height:100vh; }
+  #hint{
+    position:fixed; left:16px; bottom:14px; z-index:10;
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+    font-size:12px; color:rgba(255,255,255,0.55);
+    pointer-events:none;
+  }
+  #loading{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:#000; color:#fff; font-size:18px;
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+  }
+</style>
+</head>
+<body>
+<div id="loading">ジオメトリを読み込み中…</div>
+<canvas id="c" style="display:none"></canvas>
+<div id="hint">液体新幹線 N700S — model.dae × Viscous Glass (glass_face_1.html 技法継承)</div>
+
+<!-- 共通頂点シェーダー（背景・雨粒用 fullscreen quad） -->
+<script id="vsQuad" type="x-shader/x-vertex">#version 300 es
+layout(location=0) in vec2 aPos;
+void main(){ gl_Position=vec4(aPos,0.,1.); }
+</script>
+
+<!-- 背景：市松模様 -->
+<script id="fsBg" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+out vec4 fragColor;
+uniform vec2 iResolution;
+void main(){
+  vec2 uv = gl_FragCoord.xy / iResolution.y * 18.0;
+  float c = mod(floor(uv.x)+floor(uv.y), 2.0);
+  fragColor = vec4(mix(vec3(1.0), vec3(0.55), c), 1.0);
+}
+</script>
+
+<!-- メッシュ頂点シェーダー：液体揺らぎ -->
+<script id="vsMesh" type="x-shader/x-vertex">#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNorm;
+uniform mat4 uMVP;
+uniform mat4 uMV;
+uniform mat3 uNM;
+uniform float iTime;
+out vec3 vNorm;
+out vec3 vViewPos;
+out vec3 vWPos;
+
+// ── 多層ドメインワープ液体変形 ────────────────────────────────────────────
+vec3 liquidWobble(vec3 p, float t){
+  vec3 n = normalize(p+0.001);
+
+  // 高周波層（表面細かい波）
+  float w1=sin(p.x*3.5+t*1.6)*sin(p.y*3.0-t*1.3)*sin(p.z*4.0+t*1.1);
+  float w2=sin(p.y*6.0+t*2.1)*sin(p.z*5.0-t*1.7);
+  float w3=sin(p.x*2.0-t*0.9)*sin(p.z*2.5+t*1.2);
+  // 中周波層（流れるうねり）
+  float m1=sin(p.x*1.8+t*1.1)*sin(p.y*2.3-t*0.85)*sin(p.z*1.6+t*0.95);
+  float m2=sin(p.x*2.4-t*0.75)*sin(p.y*1.6+t*1.15)*sin(p.z*2.0-t*0.70);
+  // 低周波層（全体の大きなブヨブヨ変形）
+  float b1=sin(p.x*1.1+t*0.70)*sin(p.y*1.3-t*0.50)*sin(p.z*0.9+t*0.60);
+  float b2=sin(p.x*0.8-t*0.45)*sin(p.y*0.7+t*0.60)*sin(p.z*1.0-t*0.40);
+
+  // 固体の形を保つため低周波変形は小さく抑える
+  vec3 d1 = n*(w1*0.10+w2*0.05+w3*0.07+m1*0.06+m2*0.05+b1*0.04+b2*0.03);
+
+  // ドメインワープ：形崩れを抑えつつ有機的なゆらぎを加える
+  vec3 q  = p + d1*0.20;
+  vec3 nq = normalize(q+0.001);
+  float dw1=sin(q.x*4.0+t*2.1)*sin(q.y*3.5-t*1.7)*sin(q.z*4.5+t*1.4);
+  float dw2=sin(q.y*2.5+t*1.3)*sin(q.z*3.0-t*1.1)*sin(q.x*2.8+t*0.8);
+
+  return d1 + nq*(dw1*0.03+dw2*0.02);
+}
+
+void main(){
+  // 呼吸（形を保つため振幅を抑制）
+  float breathe = 1.0+sin(iTime*0.65)*0.06+sin(iTime*1.85+1.)*0.03+sin(iTime*3.1+2.3)*0.015;
+  vec3 p = aPos*breathe + liquidWobble(aPos, iTime);
+  vWPos    = p;
+  vec4 vp  = uMV * vec4(p, 1.0);
+  vViewPos = vp.xyz;
+  vNorm    = normalize(uNM * aNorm);
+  gl_Position = uMVP * vec4(p, 1.0);
+}
+</script>
+
+<!-- メッシュフラグメントシェーダー：粘性ガラスマテリアル（glass_face_1.html 継承） -->
+<script id="fsMesh" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec3 vNorm;
+in vec3 vViewPos;
+in vec3 vWPos;
+out vec4 fragColor;
+uniform float iTime;
+uniform vec2 iResolution;
+
+float dirChecker(vec2 d, float sc){
+  vec2 uv=d*3.+.5;
+  return mod(floor(uv.x*sc)+floor(uv.y*sc),2.);
+}
+vec3 dirCheckerColor(vec2 d, float sc, float lv){
+  return mix(vec3(1.),vec3(lv),dirChecker(d,sc));
+}
+
+void main(){
+  vec3 n = normalize(vNorm);
+
+  // 表面リップル 3層（法線を揺らして液体表面のゆらめきを再現）
+  float rip  = sin(vWPos.x*18.+iTime*2.5)*sin(vWPos.y*16.-iTime*2.0)*sin(vWPos.z*20.+iTime*1.8);
+  float rip2 = sin(vWPos.x*9. +iTime*1.3)*sin(vWPos.y*11.-iTime*1.1)*sin(vWPos.z*8. +iTime*0.9);
+  float rip3 = sin(vWPos.x*26.+iTime*3.4)*sin(vWPos.y*23.-iTime*3.0)*sin(vWPos.z*29.+iTime*2.6);
+  n = normalize(n + normalize(vWPos+.001)*(rip*0.09+rip2*0.06+rip3*0.03));
+
+  vec3 rd       = normalize(vViewPos);
+  float cosView = max(dot(-rd, n), 0.0);
+  float ior = 1.2;
+  vec3 refRd  = refract(rd, n, 1./ior);
+  if(dot(refRd,refRd)<.0001) refRd = reflect(rd, n);
+  vec3 refRd2 = reflect(rd, n);
+
+  float sc = 18.0;
+  vec3 refBg = dirCheckerColor(refRd.xy, sc, 0.42);
+
+  // フレネル
+  float fresnel = pow(1.-cosView, 3.5);
+
+  // ── ガラス色 ──────────────────────────────────────────────────────────────
+  vec3 glassCol = vec3(0.38, 0.58, 0.80)*0.15;
+  vec3 col = mix(refBg, vec3(1.), fresnel*0.22);
+  col = mix(col, glassCol, 0.09);
+
+  // 色収差
+  float ab = 0.035;
+  col.r = mix(col.r, mix(1.,.42,dirChecker(refRd.xy+vec2(ab, 0.),sc)), 0.11);
+  col.b = mix(col.b, mix(1.,.42,dirChecker(refRd.xy-vec2(ab, 0.),sc)), 0.11);
+  col.g = mix(col.g, mix(1.,.42,dirChecker(refRd.xy+vec2(0.,ab*.5),sc)), 0.05);
+
+  // ── 環境光 ─────────────────────────────────────────────────────────────────
+  col += vec3(0.88,0.93,1.0)*0.07*mix(0.5,1.3, n.y*0.5+0.5);
+
+  // ── テカリ（スペキュラ）複数層 ────────────────────────────────────────────
+  vec3 sun1 = normalize(vec3( 1.0, 1.2,-1.0));
+  vec3 sun2 = normalize(vec3(-0.6, 0.8, 0.5));  // 副光源
+
+  // シャープ主スペキュラ（液体の鋭い映り込み）
+  float spec1 = pow(max(dot(refRd2,-sun1),0.), 80.);
+  col += vec3(1.0,0.98,0.95)*spec1*0.70;
+
+  // ブロードスペキュラ（広い光沢・濡れた質感）
+  float spec2 = pow(max(dot(refRd2,-sun1),0.), 10.);
+  col += vec3(0.85,0.90,1.0)*spec2*0.18;
+
+  // 副光源スペキュラ
+  float spec3 = pow(max(dot(refRd2,-sun2),0.), 50.);
+  col += vec3(0.90,0.95,1.0)*spec3*0.30;
+
+  // ── リムライト（縁のハイライト＝液体の輪郭が光る） ───────────────────────
+  float rim = pow(1.-cosView, 2.8);
+  col += vec3(0.75,0.88,1.0)*rim*0.30;
+
+  // ── コースティクス（屈折輝点：液体内部の光の集まり） ──────────────────────
+  float caus1 = sin(vWPos.x*11.+iTime*3.0)*sin(vWPos.y*13.-iTime*2.5)*sin(vWPos.z*9.+iTime*2.0);
+  float caus2 = sin(vWPos.x*17.-iTime*2.1)*sin(vWPos.y*19.+iTime*1.7)*sin(vWPos.z*15.-iTime*2.3);
+  float caus  = pow(abs(caus1*caus2), 2.5)*1.2;
+  col += vec3(0.92,0.97,1.0)*caus*fresnel*0.25;
+
+  // ── 動くハイライト筋（流れる液体の光の線） ──────────────────────────────
+  float streak = pow(abs(sin(vWPos.x*5.+iTime*1.8+vWPos.y*3.)*0.5+0.5), 6.);
+  col += vec3(1.0,0.99,0.97)*streak*fresnel*0.12;
+
+  col = clamp(col, 0., 1.);
+  fragColor = vec4(col, 1.);
+}
+</script>
+
+<!-- ジオメトリデータ（convert_dae.py で生成） -->
+<script src="shinkansen_geo.js"></script>
+
+<script>
+// ── mat4 ユーティリティ（列主要, WebGL 標準）──────────────────────────────
+function mat4Persp(fovY, asp, near, far){
+  const f=1/Math.tan(fovY*.5), nf=1/(near-far);
+  return new Float32Array([
+    f/asp,0,0,0,
+    0,f,0,0,
+    0,0,(far+near)*nf,-1,
+    0,0,2*far*near*nf,0
+  ]);
+}
+function mat4RotY(a){
+  const c=Math.cos(a),s=Math.sin(a);
+  return new Float32Array([c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,0,1]);
+}
+function mat4RotX(a){
+  const c=Math.cos(a),s=Math.sin(a);
+  return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);
+}
+function mat4Trans(x,y,z){
+  return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+}
+function mat4Mul(a,b){
+  const r=new Float32Array(16);
+  for(let i=0;i<4;i++) for(let j=0;j<4;j++){
+    let s=0; for(let k=0;k<4;k++) s+=a[k*4+i]*b[j*4+k];
+    r[j*4+i]=s;
+  }
+  return r;
+}
+function mat3FromMat4(m){
+  return new Float32Array([m[0],m[1],m[2], m[4],m[5],m[6], m[8],m[9],m[10]]);
+}
+
+// ── WebGL 初期化 ────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2',{alpha:false});
+if(!gl){ document.getElementById('loading').textContent='WebGL2 未対応'; }
+
+function compileShader(type, src){
+  const sh=gl.createShader(type);
+  gl.shaderSource(sh,src); gl.compileShader(sh);
+  if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(sh));
+  }
+  return sh;
+}
+function linkProg(vsSrc, fsSrc){
+  const p=gl.createProgram();
+  gl.attachShader(p, compileShader(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, compileShader(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const vsQuadSrc = document.getElementById('vsQuad').textContent;
+const progBg    = linkProg(vsQuadSrc, document.getElementById('fsBg').textContent);
+const progMesh  = linkProg(document.getElementById('vsMesh').textContent,
+                           document.getElementById('fsMesh').textContent);
+
+// ── VAO / VBO ────────────────────────────────────────────────────────────────
+
+// フルスクリーン矩形 VAO（背景・雨粒共通）
+const quadVAO = gl.createVertexArray();
+gl.bindVertexArray(quadVAO);
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+gl.bindVertexArray(null);
+
+// メッシュ VAO（位置+法線、stride=24byte）
+const meshVAO = gl.createVertexArray();
+gl.bindVertexArray(meshVAO);
+const meshBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, meshBuf);
+const geoData = getShinkansenGeo();
+gl.bufferData(gl.ARRAY_BUFFER, geoData, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); // aPos
+gl.vertexAttribPointer(0,3,gl.FLOAT,false,24,0);
+gl.enableVertexAttribArray(1); // aNorm
+gl.vertexAttribPointer(1,3,gl.FLOAT,false,24,12);
+gl.bindVertexArray(null);
+
+// ── Uniform ロケーション ────────────────────────────────────────────────────
+const uResBg   = gl.getUniformLocation(progBg,   'iResolution');
+const uMVP     = gl.getUniformLocation(progMesh, 'uMVP');
+const uMV      = gl.getUniformLocation(progMesh, 'uMV');
+const uNM      = gl.getUniformLocation(progMesh, 'uNM');
+const uTimeMesh= gl.getUniformLocation(progMesh, 'iTime');
+const uResMesh = gl.getUniformLocation(progMesh, 'iResolution');
+
+function resize(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  canvas.width =window.innerWidth*dpr;
+  canvas.height=window.innerHeight*dpr;
+}
+window.addEventListener('resize',resize);
+resize();
+
+// ── 描画ループ ───────────────────────────────────────────────────────────────
+const start=performance.now();
+
+function frame(){
+  const t=(performance.now()-start)/1000;
+  const W=canvas.width, H=canvas.height;
+
+  // モデル行列：Y軸自動回転 + 少し傾けて前頭部を見せる
+  const model = mat4Mul(mat4RotY(t*0.25), mat4RotX(0.22));
+  // ビュー行列：カメラを斜め上から
+  const view  = mat4Trans(0.0, -0.12, -2.0);
+  const mv    = mat4Mul(view, model);
+  const proj  = mat4Persp(Math.PI/4, W/H, 0.01, 50.0);
+  const mvp   = mat4Mul(proj, mv);
+  const nm    = mat3FromMat4(mv);
+
+  // 背景＋メッシュを直接カンバスへ描画（雨粒なし／シングルパス）
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0,0,W,H);
+  gl.clearColor(0,0,0,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  // 背景（市松模様）
+  gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(progBg);
+  gl.uniform2f(uResBg, W, H);
+  gl.bindVertexArray(quadVAO);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+
+  // メッシュ（粘性ガラス）
+  gl.enable(gl.DEPTH_TEST);
+  gl.useProgram(progMesh);
+  gl.uniformMatrix4fv(uMVP,  false, mvp);
+  gl.uniformMatrix4fv(uMV,   false, mv);
+  gl.uniformMatrix3fv(uNM,   false, nm);
+  gl.uniform1f(uTimeMesh, t);
+  gl.uniform2f(uResMesh,  W, H);
+  gl.bindVertexArray(meshVAO);
+  gl.drawArrays(gl.TRIANGLES, 0, SHINKANSEN_VERT_COUNT);
+
+  requestAnimationFrame(frame);
+}
+
+// shinkansen_geo.js のロードを待ってから開始
+window.addEventListener('load', ()=>{
+  document.getElementById('loading').style.display='none';
+  canvas.style.display='block';
+  requestAnimationFrame(frame);
+});
+</script>
+</body>
+</html>
